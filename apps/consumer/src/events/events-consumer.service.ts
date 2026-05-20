@@ -1,7 +1,7 @@
 import {
   Injectable,
   Logger,
-  OnModuleInit,
+  OnApplicationBootstrap,
 } from '@nestjs/common';
 import type { ConsumeMessage } from 'amqplib';
 import {
@@ -15,7 +15,7 @@ import { IdempotencyService } from '../persistence/idempotency.service';
 import { NotificationPublisherService } from '../notifications/notification-publisher.service';
 
 @Injectable()
-export class EventsConsumerService implements OnModuleInit {
+export class EventsConsumerService implements OnApplicationBootstrap {
   private readonly logger = new Logger(EventsConsumerService.name);
 
   constructor(
@@ -24,7 +24,7 @@ export class EventsConsumerService implements OnModuleInit {
     private readonly notifications: NotificationPublisherService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.consumer.start({
       queue: RABBIT_QUEUES.EVENTS_MAIN,
       exchange: RABBIT_EXCHANGES.EVENTS_TOPIC,

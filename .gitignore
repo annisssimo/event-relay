@@ -4,3 +4,6 @@ coverage
 .env
 *.log
 .DS_Store
+libs/**/src/**/*.js
+libs/**/src/**/*.js.map
+libs/**/src/**/*.d.ts

@@ -5,7 +5,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import amqp, { Channel, ChannelModel, ConfirmChannel } from 'amqplib';
+import { connect, Channel, ChannelModel, ConfirmChannel } from 'amqplib';
 import { RabbitHealthProbe } from '@app/common';
 import { sleep } from '@app/common';
 
@@ -76,7 +76,7 @@ export class RabbitConnectionManager
   }
 
   private async connect(): Promise<void> {
-    const conn = await amqp.connect(this.getUrl());
+    const conn = await connect(this.getUrl());
     this.connection = conn;
     this.connected = true;
 

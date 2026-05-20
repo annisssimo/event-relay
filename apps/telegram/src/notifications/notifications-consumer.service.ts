@@ -1,11 +1,11 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { NotificationEnvelope, RABBIT_EXCHANGES, RABBIT_QUEUES } from '@app/contracts';
 import { PermanentError } from '@app/common';
 import { RabbitConsumerService } from '@app/messaging';
 import { NotificationSenderService } from '../telegram/notification-sender.service';
 
 @Injectable()
-export class NotificationsConsumerService implements OnModuleInit {
+export class NotificationsConsumerService implements OnApplicationBootstrap {
   private readonly logger = new Logger(NotificationsConsumerService.name);
 
   constructor(
@@ -13,7 +13,7 @@ export class NotificationsConsumerService implements OnModuleInit {
     private readonly sender: NotificationSenderService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.consumer.start({
       queue: RABBIT_QUEUES.NOTIFICATIONS_TELEGRAM,
       exchange: RABBIT_EXCHANGES.NOTIFICATIONS_DIRECT,

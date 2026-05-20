@@ -1,5 +1,5 @@
 {
-  "moduleFileExtensions": ["js", "json", "ts"],
+  "moduleFileExtensions": ["ts", "js", "json"],
   "rootDir": "..",
   "testEnvironment": "node",
   "testMatch": ["<rootDir>/test/integration/**/*.integration-spec.ts"],

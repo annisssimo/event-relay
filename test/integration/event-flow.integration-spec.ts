@@ -1,6 +1,5 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import amqp from 'amqplib';
 import { Client } from 'pg';
 import { GenericContainer, Wait } from 'testcontainers';
 import { ConsumerModule } from '../../apps/consumer/src/consumer.module';
@@ -74,21 +73,6 @@ describe('Event pipeline (integration)', () => {
     await producerApp.init();
 
     eventsService = producerApp.get(EventsService);
-
-    // Allow topology declaration + consumer subscription to settle.
-    await waitFor(async () => {
-      const conn = await amqp.connect(rabbitUrl);
-      const channel = await conn.createChannel();
-      try {
-        await channel.checkQueue(RABBIT_QUEUES.EVENTS_MAIN);
-        return true;
-      } catch {
-        return false;
-      } finally {
-        await channel.close();
-        await conn.close();
-      }
-    }, 30_000);
   }, 180_000);
 
   afterAll(async () => {
@@ -114,7 +98,7 @@ describe('Event pipeline (integration)', () => {
   }
 
   async function drainNotificationQueue(): Promise<Buffer | null> {
-    const conn = await amqp.connect(rabbitUrl);
+    const conn = await connect(rabbitUrl);
     const channel = await conn.createChannel();
     try {
       const msg = await channel.get(RABBIT_QUEUES.NOTIFICATIONS_TELEGRAM, {

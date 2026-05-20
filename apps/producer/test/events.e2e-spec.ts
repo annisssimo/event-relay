@@ -4,6 +4,7 @@ import * as request from 'supertest';
 import { EventsController } from '../src/events/events.controller';
 import { EventsService } from '../src/events/events.service';
 import { RabbitPublisherService } from '@app/messaging';
+import { TopologyBootstrapService } from '../src/topology-bootstrap.service';
 
 describe('EventsController (e2e)', () => {
   let app: INestApplication;
@@ -15,6 +16,10 @@ describe('EventsController (e2e)', () => {
       providers: [
         EventsService,
         { provide: RabbitPublisherService, useValue: { publish } },
+        {
+          provide: TopologyBootstrapService,
+          useValue: { whenReady: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

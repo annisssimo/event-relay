@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventsService } from './events.service';
 import { RabbitPublisherService } from '@app/messaging';
+import { TopologyBootstrapService } from '../topology-bootstrap.service';
 
 describe('EventsService', () => {
   let service: EventsService;
@@ -11,6 +12,10 @@ describe('EventsService', () => {
       providers: [
         EventsService,
         { provide: RabbitPublisherService, useValue: { publish } },
+        {
+          provide: TopologyBootstrapService,
+          useValue: { whenReady: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
 

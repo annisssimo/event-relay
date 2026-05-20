@@ -13,6 +13,7 @@ import {
 } from '@app/contracts';
 import { RabbitPublisherService } from '@app/messaging';
 import { isTransientError } from '@app/common';
+import { TopologyBootstrapService } from '../topology-bootstrap.service';
 
 export type PublishEventResult = CreateEventResponseDto;
 
@@ -20,9 +21,13 @@ export type PublishEventResult = CreateEventResponseDto;
 export class EventsService {
   private readonly logger = new Logger(EventsService.name);
 
-  constructor(private readonly publisher: RabbitPublisherService) {}
+  constructor(
+    private readonly publisher: RabbitPublisherService,
+    private readonly topologyBootstrap: TopologyBootstrapService,
+  ) {}
 
   async publish(dto: CreateEventDto): Promise<PublishEventResult> {
+    await this.topologyBootstrap.whenReady();
     const eventId = dto.eventId ?? uuidv4();
     const envelope: EventEnvelope = {
       eventId,

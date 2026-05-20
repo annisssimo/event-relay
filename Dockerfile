@@ -19,4 +19,4 @@ COPY nest-cli.json ./
 ARG APP_NAME=producer
 ENV APP_NAME=${APP_NAME}
 
-CMD ["sh", "-c", "node dist/apps/${APP_NAME}/main.js"]
+CMD ["sh", "-c", "node dist/apps/${APP_NAME}/apps/${APP_NAME}/src/main.js"]
