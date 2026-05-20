@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { connect } from 'amqplib';
 import { Client } from 'pg';
 import { GenericContainer, Wait } from 'testcontainers';
 import { ConsumerModule } from '../../apps/consumer/src/consumer.module';
