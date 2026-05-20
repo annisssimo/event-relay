@@ -37,7 +37,7 @@ services:
       DATABASE_URL: postgresql://app:app@postgres:5432/events
       TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
       CONSUMER_PORT: 3002
-      DB_SYNCHRONIZE: 'true'
+      DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-true}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -75,7 +75,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
       TELEGRAM_PORT: 3003
-      DB_SYNCHRONIZE: 'true'
+      DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-true}
     depends_on:
       rabbitmq:
         condition: service_healthy

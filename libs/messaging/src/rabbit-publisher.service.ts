@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { ConfirmChannel } from 'amqplib';
 import { MESSAGE_HEADERS } from '@app/contracts';
 import { withRetry } from '@app/common';
@@ -6,14 +6,27 @@ import { RabbitConnectionManager } from './rabbit-connection.manager';
 import { PublishOptions } from './types';
 
 @Injectable()
-export class RabbitPublisherService implements OnModuleDestroy {
+export class RabbitPublisherService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RabbitPublisherService.name);
   private channel: ConfirmChannel | null = null;
   private channelPromise: Promise<ConfirmChannel> | null = null;
+  private unsubscribeReconnect: (() => void) | null = null;
 
   constructor(private readonly connection: RabbitConnectionManager) {}
 
+  onModuleInit(): void {
+    this.unsubscribeReconnect = this.connection.onReconnect(() => {
+      this.resetChannel();
+    });
+  }
+
+  private resetChannel(): void {
+    this.channel = null;
+    this.channelPromise = null;
+  }
+
   async onModuleDestroy(): Promise<void> {
+    this.unsubscribeReconnect?.();
     if (this.channel) {
       try {
         await this.channel.close();
@@ -35,8 +48,7 @@ export class RabbitPublisherService implements OnModuleDestroy {
         .then((ch) => {
           this.channel = ch;
           ch.on('close', () => {
-            this.channel = null;
-            this.channelPromise = null;
+            this.resetChannel();
           });
           return ch;
         });

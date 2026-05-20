@@ -1,14 +1,9 @@
-import {
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-  OnModuleInit,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import type { Channel, ConsumeMessage } from 'amqplib';
 import { MESSAGE_HEADERS, RETRY_POLICY } from '@app/contracts';
-import { PermanentError, isTransientError } from '@app/common';
+import { PermanentError, isTransientError, sleep } from '@app/common';
 import { RabbitConnectionManager } from './rabbit-connection.manager';
-import { ConsumerOptions, MessageHandler } from './types';
+import { ConsumerOptions } from './types';
 
 @Injectable()
 export class RabbitConsumerService implements OnModuleDestroy {
@@ -17,20 +12,39 @@ export class RabbitConsumerService implements OnModuleDestroy {
   private consumerTag: string | null = null;
   private inFlight = 0;
   private options: ConsumerOptions | null = null;
+  private shuttingDown = false;
+  private reconnecting = false;
+  private tearingDown = false;
+  private unsubscribeReconnect: (() => void) | null = null;
 
   constructor(private readonly connection: RabbitConnectionManager) {}
 
   async start(options: ConsumerOptions): Promise<void> {
     this.options = options;
+    this.unsubscribeReconnect = this.connection.onReconnect(() =>
+      this.handleReconnect('connection'),
+    );
     await this.setupConsumer();
   }
 
   private async setupConsumer(): Promise<void> {
-    if (!this.options) {
+    if (!this.options || this.shuttingDown) {
       return;
     }
+
     const channel = await this.connection.createChannel();
     this.channel = channel;
+
+    channel.on('close', () => {
+      if (
+        !this.shuttingDown &&
+        !this.tearingDown &&
+        this.connection.isConnected()
+      ) {
+        void this.handleReconnect('channel');
+      }
+    });
+
     const prefetch = this.options.prefetch ?? 10;
     await channel.prefetch(prefetch);
 
@@ -46,6 +60,53 @@ export class RabbitConsumerService implements OnModuleDestroy {
     );
     this.consumerTag = consumerTag;
     this.logger.log(`Consuming queue=${this.options.queue} tag=${consumerTag}`);
+  }
+
+  private async handleReconnect(source: 'connection' | 'channel'): Promise<void> {
+    if (this.shuttingDown || !this.options || this.reconnecting) {
+      return;
+    }
+
+    this.reconnecting = true;
+    try {
+      this.logger.warn(`Consumer reconnect triggered by ${source}`);
+      await this.teardownConsumer(false);
+      if (!this.shuttingDown && this.connection.isConnected()) {
+        await this.setupConsumer();
+      }
+    } catch (error) {
+      this.logger.error(
+        `Consumer reconnect failed: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    } finally {
+      this.reconnecting = false;
+    }
+  }
+
+  private async teardownConsumer(waitInFlight: boolean): Promise<void> {
+    if (waitInFlight) {
+      const deadline = Date.now() + 30_000;
+      while (this.inFlight > 0 && Date.now() < deadline) {
+        await sleep(100);
+      }
+    }
+
+    this.tearingDown = true;
+    try {
+      if (this.channel && this.consumerTag) {
+        try {
+          await this.channel.cancel(this.consumerTag);
+          await this.channel.close();
+        } catch {
+          // ignore
+        }
+      }
+    } finally {
+      this.channel = null;
+      this.consumerTag = null;
+      this.tearingDown = false;
+    }
   }
 
   private getRetryCount(msg: ConsumeMessage): number {
@@ -127,19 +188,9 @@ export class RabbitConsumerService implements OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    const deadline = Date.now() + 30_000;
-    while (this.inFlight > 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    if (this.channel && this.consumerTag) {
-      try {
-        await this.channel.cancel(this.consumerTag);
-        await this.channel.close();
-      } catch {
-        // ignore
-      }
-    }
-    this.channel = null;
-    this.consumerTag = null;
+    this.shuttingDown = true;
+    this.unsubscribeReconnect?.();
+    this.unsubscribeReconnect = null;
+    await this.teardownConsumer(true);
   }
 }

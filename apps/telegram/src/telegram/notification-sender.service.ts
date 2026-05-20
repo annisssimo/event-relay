@@ -14,27 +14,30 @@ export class NotificationSenderService {
   ) {}
 
   async sendFromEnvelope(envelope: NotificationEnvelope): Promise<void> {
-    if (await this.sent.isAlreadySent(envelope.eventId)) {
+    const chatId = String(envelope.notification.chatId);
+    const reserved = await this.sent.tryReserve(envelope.eventId, chatId);
+    if (!reserved) {
       this.logger.log(`Skip duplicate notification eventId=${envelope.eventId}`);
       return;
     }
 
-    const result = await this.telegram.sendMessage({
-      chatId: envelope.notification.chatId,
-      text: envelope.notification.text,
-      parseMode: envelope.notification.parseMode,
-      disableNotification: envelope.notification.disableNotification,
-    });
+    try {
+      const result = await this.telegram.sendMessage({
+        chatId: envelope.notification.chatId,
+        text: envelope.notification.text,
+        parseMode: envelope.notification.parseMode,
+        disableNotification: envelope.notification.disableNotification,
+      });
 
-    await this.sent.markSent(
-      envelope.eventId,
-      String(envelope.notification.chatId),
-      result.messageId,
-    );
+      await this.sent.markDelivered(envelope.eventId, result.messageId);
 
-    this.logger.log(
-      `Telegram sent eventId=${envelope.eventId} messageId=${result.messageId}`,
-    );
+      this.logger.log(
+        `Telegram sent eventId=${envelope.eventId} messageId=${result.messageId}`,
+      );
+    } catch (error) {
+      await this.sent.releaseReservation(envelope.eventId);
+      throw error;
+    }
   }
 
   async sendFromDto(dto: NotifyDto): Promise<{ eventId: string; status: string }> {

@@ -8,7 +8,6 @@ import {
   EventEnvelope,
   RABBIT_EXCHANGES,
   RABBIT_QUEUES,
-  RABBIT_ROUTING_KEYS,
 } from '@app/contracts';
 import { PermanentError } from '@app/common';
 import { RabbitConsumerService } from '@app/messaging';
@@ -61,7 +60,7 @@ export class EventsConsumerService implements OnModuleInit {
 
     if (begin.action === 'skip') {
       this.logger.log(
-        `Skip duplicate eventId=${envelope.eventId} type=${envelope.type} durationMs=${Date.now() - started}`,
+        `Skip duplicate eventId=${envelope.eventId} type=${envelope.type} reason=${begin.reason} durationMs=${Date.now() - started}`,
       );
       return;
     }

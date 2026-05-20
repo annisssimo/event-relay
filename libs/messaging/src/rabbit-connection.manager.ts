@@ -9,6 +9,8 @@ import amqp, { Channel, ChannelModel, ConfirmChannel } from 'amqplib';
 import { RabbitHealthProbe } from '@app/common';
 import { sleep } from '@app/common';
 
+export type ReconnectListener = () => void | Promise<void>;
+
 @Injectable()
 export class RabbitConnectionManager
   implements OnModuleInit, OnModuleDestroy, RabbitHealthProbe
@@ -17,7 +19,9 @@ export class RabbitConnectionManager
   private connection: ChannelModel | null = null;
   private connected = false;
   private shuttingDown = false;
+  private hasConnectedOnce = false;
   private readonly reconnectBaseMs: number;
+  private readonly reconnectListeners = new Set<ReconnectListener>();
 
   constructor(private readonly config: ConfigService) {
     this.reconnectBaseMs = Number(
@@ -29,12 +33,18 @@ export class RabbitConnectionManager
     return this.connected && this.connection !== null;
   }
 
+  onReconnect(listener: ReconnectListener): () => void {
+    this.reconnectListeners.add(listener);
+    return () => this.reconnectListeners.delete(listener);
+  }
+
   async onModuleInit(): Promise<void> {
     await this.connectWithRetry();
   }
 
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
+    this.reconnectListeners.clear();
     await this.close();
   }
 
@@ -83,7 +93,26 @@ export class RabbitConnectionManager
       }
     });
 
+    const isReconnect = this.hasConnectedOnce;
+    this.hasConnectedOnce = true;
     this.logger.log('RabbitMQ connected');
+
+    if (isReconnect) {
+      await this.notifyReconnect();
+    }
+  }
+
+  private async notifyReconnect(): Promise<void> {
+    for (const listener of this.reconnectListeners) {
+      try {
+        await listener();
+      } catch (error) {
+        this.logger.error(
+          `Reconnect listener failed: ${(error as Error).message}`,
+          (error as Error).stack,
+        );
+      }
+    }
   }
 
   async createChannel(): Promise<Channel> {

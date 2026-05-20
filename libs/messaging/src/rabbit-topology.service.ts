@@ -30,9 +30,6 @@ export class RabbitTopologyService {
       { durable: true },
     );
 
-    const eventsDlqArgs = {
-      'x-dead-letter-exchange': RABBIT_EXCHANGES.EVENTS_DLX,
-    };
     const eventsRetryArgs = {
       'x-dead-letter-exchange': RABBIT_EXCHANGES.EVENTS_TOPIC,
       'x-dead-letter-routing-key': RABBIT_ROUTING_KEYS.EVENT_DEFAULT,
@@ -71,9 +68,6 @@ export class RabbitTopologyService {
       'event.retry',
     );
 
-    const notificationsDlqArgs = {
-      'x-dead-letter-exchange': RABBIT_EXCHANGES.NOTIFICATIONS_DLX,
-    };
     const notificationsRetryArgs = {
       'x-dead-letter-exchange': RABBIT_EXCHANGES.NOTIFICATIONS_DIRECT,
       'x-dead-letter-routing-key':

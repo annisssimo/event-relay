@@ -9,7 +9,6 @@ import {
   EVENT_ENVELOPE_VERSION,
   EventEnvelope,
   RABBIT_EXCHANGES,
-  RABBIT_ROUTING_KEYS,
 } from '@app/contracts';
 import { RabbitPublisherService } from '@app/messaging';
 import { isTransientError } from '@app/common';
@@ -37,7 +36,7 @@ export class EventsService {
       correlationId: dto.correlationId,
     };
 
-    const routingKey = `event.${dto.type.replace(/\./g, '.')}`;
+    const routingKey = `event.${dto.type}`;
 
     try {
       await this.publisher.publish(JSON.stringify(envelope), {

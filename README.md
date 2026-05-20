@@ -78,12 +78,15 @@ npm run start:producer:dev
 
 ### Consumer
 - Manual ack after successful processing.
+- **Auto-resubscribe** on RabbitMQ connection/channel recovery.
 - Transient failures → delayed retry queue (`x-retry-count`, max 5).
 - Permanent failures / max retries → **DLQ** (`events.dlq`) via explicit `sendToQueue`.
+- Idempotency: atomic insert + skip concurrent `PROCESSING`; stale locks reclaimed after 2 min.
 - Structured logs: `eventId`, `type`, `result`, `durationMs`.
 
 ### Telegram
 - Handles 429 (`retry_after`), 5xx retries.
+- **Reserve-before-send** dedup in PostgreSQL (release on API failure).
 - Truncates messages > 4096 chars.
 - Invalid token → process fails at startup.
 - Invalid `chatId` → permanent error → DLQ.
@@ -101,6 +104,15 @@ Current flow: consumer marks event completed in PG, then publishes notification.
 ```bash
 npm test
 npm run test:e2e
+npm run lint
+```
+
+## Production database
+
+For production set `DB_SYNCHRONIZE=false` and apply schema:
+
+```bash
+psql "$DATABASE_URL" -f migrations/001_init.sql
 ```
 
 ## Project layout

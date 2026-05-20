@@ -13,6 +13,7 @@ import { NotificationSenderService } from './telegram/notification-sender.servic
 import { NotificationsConsumerService } from './notifications/notifications-consumer.service';
 import { NotifyController } from './notify/notify.controller';
 import { HealthController } from './health/health.controller';
+import { TopologyBootstrapService } from './topology-bootstrap.service';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { HealthController } from './health/health.controller';
   ],
   controllers: [NotifyController, HealthController],
   providers: [
+    TopologyBootstrapService,
     TelegramApiClient,
     SentNotificationService,
     NotificationSenderService,
