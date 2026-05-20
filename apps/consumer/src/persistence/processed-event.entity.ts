@@ -17,6 +17,7 @@ export class ProcessedEventEntity {
   @Column({
     type: 'enum',
     enum: ProcessedEventStatus,
+    enumName: 'processed_event_status',
     default: ProcessedEventStatus.PROCESSING,
   })
   status!: ProcessedEventStatus;

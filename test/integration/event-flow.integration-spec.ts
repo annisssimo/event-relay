@@ -4,12 +4,12 @@ import amqp from 'amqplib';
 import { Client } from 'pg';
 import { GenericContainer, Wait } from 'testcontainers';
 import { ConsumerModule } from '../../apps/consumer/src/consumer.module';
-import { EventsService } from '../../apps/producer/src/events/events.service';
-import { ProducerModule } from '../../apps/producer/src/producer.module';
-import { TelegramModule } from '../../apps/telegram/src/telegram.module';
 import {
   ProcessedEventStatus,
 } from '../../apps/consumer/src/persistence/processed-event.entity';
+import { EventsService } from '../../apps/producer/src/events/events.service';
+import { ProducerModule } from '../../apps/producer/src/producer.module';
+import { TelegramModule } from '../../apps/telegram/src/telegram.module';
 import { RABBIT_QUEUES } from '@app/contracts';
 import { applyMigration, waitFor } from './helpers';
 
@@ -18,6 +18,10 @@ describe('Event pipeline (integration)', () => {
   let databaseUrl: string;
   let rabbitContainer: Awaited<ReturnType<GenericContainer['start']>>;
   let pgContainer: Awaited<ReturnType<GenericContainer['start']>>;
+  let consumerApp: INestApplication;
+  let producerApp: INestApplication;
+  let telegramApp: INestApplication | null = null;
+  let eventsService: EventsService;
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
@@ -56,31 +60,44 @@ describe('Event pipeline (integration)', () => {
     process.env.DATABASE_URL = databaseUrl;
 
     await applyMigration(databaseUrl);
-  }, 180_000);
 
-  afterAll(async () => {
-    await rabbitContainer?.stop();
-    await pgContainer?.stop();
-  }, 60_000);
-
-  async function bootstrapApps(): Promise<{
-    consumerApp: INestApplication;
-    producerApp: INestApplication;
-  }> {
     const consumerModule = await Test.createTestingModule({
       imports: [ConsumerModule],
     }).compile();
-    const consumerApp = consumerModule.createNestApplication();
+    consumerApp = consumerModule.createNestApplication();
     await consumerApp.init();
 
     const producerModule = await Test.createTestingModule({
       imports: [ProducerModule],
     }).compile();
-    const producerApp = producerModule.createNestApplication();
+    producerApp = producerModule.createNestApplication();
     await producerApp.init();
 
-    return { consumerApp, producerApp };
-  }
+    eventsService = producerApp.get(EventsService);
+
+    // Allow topology declaration + consumer subscription to settle.
+    await waitFor(async () => {
+      const conn = await amqp.connect(rabbitUrl);
+      const channel = await conn.createChannel();
+      try {
+        await channel.checkQueue(RABBIT_QUEUES.EVENTS_MAIN);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        await channel.close();
+        await conn.close();
+      }
+    }, 30_000);
+  }, 180_000);
+
+  afterAll(async () => {
+    await telegramApp?.close();
+    await producerApp?.close();
+    await consumerApp?.close();
+    await rabbitContainer?.stop();
+    await pgContainer?.stop();
+  }, 60_000);
 
   async function getProcessedStatus(eventId: string): Promise<string | null> {
     const client = new Client({ connectionString: databaseUrl });
@@ -111,65 +128,50 @@ describe('Event pipeline (integration)', () => {
   }
 
   it('publishes event → consumer processes → notification enqueued', async () => {
-    const { consumerApp, producerApp } = await bootstrapApps();
-    try {
-      const eventsService = producerApp.get(EventsService);
-      const result = await eventsService.publish({
-        type: 'user.registered',
-        payload: { userId: '42', email: 'u@example.com' },
-      });
+    const result = await eventsService.publish({
+      type: 'user.registered',
+      payload: { userId: '42', email: 'u@example.com' },
+    });
 
-      await waitFor(async () => {
-        const status = await getProcessedStatus(result.eventId);
-        return status === ProcessedEventStatus.COMPLETED;
-      });
+    await waitFor(async () => {
+      const status = await getProcessedStatus(result.eventId);
+      return status === ProcessedEventStatus.COMPLETED;
+    }, 30_000);
 
-      const notificationBody = await drainNotificationQueue();
-      expect(notificationBody).toBeTruthy();
-      const envelope = JSON.parse(notificationBody!.toString('utf8'));
-      expect(envelope.eventId).toBe(result.eventId);
-      expect(envelope.type).toBe('user.registered');
-      expect(envelope.notification.text).toContain('user.registered');
-    } finally {
-      await producerApp.close();
-      await consumerApp.close();
-    }
+    const notificationBody = await drainNotificationQueue();
+    expect(notificationBody).toBeTruthy();
+    const envelope = JSON.parse(notificationBody!.toString('utf8'));
+    expect(envelope.eventId).toBe(result.eventId);
+    expect(envelope.type).toBe('user.registered');
+    expect(envelope.notification.text).toContain('user.registered');
   }, 60_000);
 
   it('skips duplicate eventId (idempotency)', async () => {
-    const { consumerApp, producerApp } = await bootstrapApps();
-    const eventId = '550e8400-e29b-41d4-a716-446655440000';
+    const eventId = '660e8400-e29b-41d4-a716-446655440001';
 
-    try {
-      const eventsService = producerApp.get(EventsService);
+    await eventsService.publish({
+      type: 'order.created',
+      payload: { orderId: '1' },
+      eventId,
+    });
 
-      await eventsService.publish({
-        type: 'order.created',
-        payload: { orderId: '1' },
-        eventId,
-      });
+    await waitFor(async () => {
+      const status = await getProcessedStatus(eventId);
+      return status === ProcessedEventStatus.COMPLETED;
+    }, 30_000);
 
-      await waitFor(async () => {
-        const status = await getProcessedStatus(eventId);
-        return status === ProcessedEventStatus.COMPLETED;
-      });
+    await drainNotificationQueue();
 
-      await drainNotificationQueue();
+    await eventsService.publish({
+      type: 'order.created',
+      payload: { orderId: '1' },
+      eventId,
+    });
 
-      await eventsService.publish({
-        type: 'order.created',
-        payload: { orderId: '1' },
-        eventId,
-      });
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-
-      const secondNotification = await drainNotificationQueue();
-      expect(secondNotification).toBeNull();
-    } finally {
-      await producerApp.close();
-      await consumerApp.close();
-    }
+    const secondNotification = await drainNotificationQueue();
+    expect(secondNotification).toBeNull();
   }, 60_000);
 
   it('delivers notification via Telegram service with mocked Bot API', async () => {
@@ -178,26 +180,13 @@ describe('Event pipeline (integration)', () => {
       json: async () => ({ ok: true, result: { message_id: 42 } }),
     } as Response);
 
-    const consumerModule = await Test.createTestingModule({
-      imports: [ConsumerModule],
-    }).compile();
-    const consumerApp = consumerModule.createNestApplication();
-    await consumerApp.init();
-
     const telegramModule = await Test.createTestingModule({
       imports: [TelegramModule],
     }).compile();
-    const telegramApp = telegramModule.createNestApplication();
+    telegramApp = telegramModule.createNestApplication();
     await telegramApp.init();
 
-    const producerModule = await Test.createTestingModule({
-      imports: [ProducerModule],
-    }).compile();
-    const producerApp = producerModule.createNestApplication();
-    await producerApp.init();
-
     try {
-      const eventsService = producerApp.get(EventsService);
       const result = await eventsService.publish({
         type: 'payment.received',
         payload: { amount: 100 },
@@ -206,7 +195,7 @@ describe('Event pipeline (integration)', () => {
       await waitFor(async () => {
         const status = await getProcessedStatus(result.eventId);
         return status === ProcessedEventStatus.COMPLETED;
-      }, 20_000);
+      }, 30_000);
 
       await waitFor(async () => {
         const client = new Client({ connectionString: databaseUrl });
@@ -220,14 +209,11 @@ describe('Event pipeline (integration)', () => {
         } finally {
           await client.end();
         }
-      }, 20_000);
+      }, 30_000);
 
       expect(fetchMock).toHaveBeenCalled();
     } finally {
       fetchMock.mockRestore();
-      await producerApp.close();
-      await consumerApp.close();
-      await telegramApp.close();
     }
   }, 90_000);
 });

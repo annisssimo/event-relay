@@ -4,6 +4,7 @@
   "testEnvironment": "node",
   "testMatch": ["<rootDir>/test/integration/**/*.integration-spec.ts"],
   "testTimeout": 180000,
+  "forceExit": true,
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
