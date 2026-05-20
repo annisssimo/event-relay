@@ -6,6 +6,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import {
   CreateEventDto,
+  CreateEventResponseDto,
   EVENT_ENVELOPE_VERSION,
   EventEnvelope,
   RABBIT_EXCHANGES,
@@ -13,11 +14,7 @@ import {
 import { RabbitPublisherService } from '@app/messaging';
 import { isTransientError } from '@app/common';
 
-export interface PublishEventResult {
-  eventId: string;
-  status: 'accepted';
-  publishedAt: string;
-}
+export type PublishEventResult = CreateEventResponseDto;
 
 @Injectable()
 export class EventsService {

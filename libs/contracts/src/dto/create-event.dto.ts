@@ -24,7 +24,7 @@ export class CreateEventDto {
   @IsUUID('4')
   eventId?: string;
 
-  @ApiPropertyOptional({ format: 'uuid' })
+  @ApiPropertyOptional({ example: 'req-abc-123' })
   @IsOptional()
   @IsString()
   @MaxLength(64)

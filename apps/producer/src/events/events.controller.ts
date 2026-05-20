@@ -1,6 +1,6 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiCreatedResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CreateEventDto } from '@app/contracts';
+import { CreateEventDto, CreateEventResponseDto } from '@app/contracts';
 import { EventsService } from './events.service';
 
 @ApiTags('events')
@@ -11,8 +11,8 @@ export class EventsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Publish a domain event to RabbitMQ' })
-  @ApiCreatedResponse({ description: 'Event accepted by broker' })
-  publish(@Body() dto: CreateEventDto) {
+  @ApiCreatedResponse({ type: CreateEventResponseDto })
+  publish(@Body() dto: CreateEventDto): Promise<CreateEventResponseDto> {
     return this.eventsService.publish(dto);
   }
 }

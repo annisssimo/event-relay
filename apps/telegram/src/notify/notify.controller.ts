@@ -1,6 +1,6 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiCreatedResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { NotifyDto } from '@app/contracts';
+import { NotifyDto, NotifyResponseDto } from '@app/contracts';
 import { NotificationSenderService } from '../telegram/notification-sender.service';
 
 @ApiTags('notify')
@@ -11,8 +11,8 @@ export class NotifyController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Send a Telegram notification directly (bypass queue)' })
-  @ApiCreatedResponse()
-  notify(@Body() dto: NotifyDto) {
+  @ApiCreatedResponse({ type: NotifyResponseDto })
+  notify(@Body() dto: NotifyDto): Promise<NotifyResponseDto> {
     return this.sender.sendFromDto(dto);
   }
 }

@@ -17,7 +17,7 @@ export class NotificationsConsumerService implements OnModuleInit {
     await this.consumer.start({
       queue: RABBIT_QUEUES.NOTIFICATIONS_TELEGRAM,
       exchange: RABBIT_EXCHANGES.NOTIFICATIONS_DIRECT,
-      dlqQueue: RABBIT_QUEUES.NOTIFICATIONS_DLQ,
+      dlqExchange: RABBIT_EXCHANGES.NOTIFICATIONS_DLX,
       retryRoutingKey: 'notification.retry',
       prefetch: 5,
       handler: (content) => this.handle(content),

@@ -26,6 +26,23 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: app
+      PGPASSWORD: app
+      PGDATABASE: events
+    volumes:
+      - ./migrations:/migrations:ro
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - psql -f /migrations/001_init.sql && echo 'Migration complete'
+    restart: 'no'
+
   consumer:
     build:
       context: .
@@ -37,14 +54,22 @@ services:
       DATABASE_URL: postgresql://app:app@postgres:5432/events
       TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
       CONSUMER_PORT: 3002
-      DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-true}
+      DB_SYNCHRONIZE: 'false'
     depends_on:
       rabbitmq:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - '3002:3002'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3002/api/v1/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   producer:
     build:
@@ -59,9 +84,15 @@ services:
       rabbitmq:
         condition: service_healthy
       consumer:
-        condition: service_started
+        condition: service_healthy
     ports:
       - '3001:3001'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3001/api/v1/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   telegram:
     build:
@@ -75,13 +106,21 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
       TELEGRAM_PORT: 3003
-      DB_SYNCHRONIZE: ${DB_SYNCHRONIZE:-true}
+      DB_SYNCHRONIZE: 'false'
     depends_on:
       rabbitmq:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       consumer:
-        condition: service_started
+        condition: service_healthy
     ports:
       - '3003:3003'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3003/api/v1/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

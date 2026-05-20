@@ -28,7 +28,7 @@ export class EventsConsumerService implements OnModuleInit {
     await this.consumer.start({
       queue: RABBIT_QUEUES.EVENTS_MAIN,
       exchange: RABBIT_EXCHANGES.EVENTS_TOPIC,
-      dlqQueue: RABBIT_QUEUES.EVENTS_DLQ,
+      dlqExchange: RABBIT_EXCHANGES.EVENTS_DLX,
       retryRoutingKey: 'event.retry',
       prefetch: 10,
       handler: (content, raw) => this.handle(content, raw),

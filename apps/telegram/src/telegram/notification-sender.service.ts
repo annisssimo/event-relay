@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
-import { NotificationEnvelope, NotifyDto } from '@app/contracts';
+import { NotificationEnvelope, NotifyDto, NotifyResponseDto } from '@app/contracts';
 import { SentNotificationService } from '../persistence/sent-notification.service';
 import { TelegramApiClient } from './telegram-api.client';
 
@@ -40,7 +40,7 @@ export class NotificationSenderService {
     }
   }
 
-  async sendFromDto(dto: NotifyDto): Promise<{ eventId: string; status: string }> {
+  async sendFromDto(dto: NotifyDto): Promise<NotifyResponseDto> {
     const eventId = dto.eventId ?? uuidv4();
     const envelope: NotificationEnvelope = {
       eventId,
@@ -54,6 +54,6 @@ export class NotificationSenderService {
       },
     };
     await this.sendFromEnvelope(envelope);
-    return { eventId, status: 'sent' };
+    return { eventId, status: 'sent' as const };
   }
 }

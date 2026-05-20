@@ -34,7 +34,7 @@ import { TopologyBootstrapService } from './topology-bootstrap.service';
           config.get<string>('DATABASE_URL') ??
           'postgresql://app:app@localhost:5432/events',
         entities: [SentNotificationEntity],
-        synchronize: config.get('DB_SYNCHRONIZE', 'true') === 'true',
+        synchronize: config.get('DB_SYNCHRONIZE', 'false') === 'true',
         logging: config.get('DB_LOGGING', 'false') === 'true',
       }),
     }),

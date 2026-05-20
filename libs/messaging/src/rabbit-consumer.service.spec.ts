@@ -24,6 +24,7 @@ describe('RabbitConsumerService', () => {
   let service: RabbitConsumerService;
   let connection: {
     createChannel: jest.Mock;
+    createConfirmChannel: jest.Mock;
     isConnected: jest.Mock;
     onReconnect: jest.Mock;
   };
@@ -31,11 +32,15 @@ describe('RabbitConsumerService', () => {
     prefetch: jest.Mock;
     consume: jest.Mock;
     ack: jest.Mock;
-    sendToQueue: jest.Mock;
     publish: jest.Mock;
     cancel: jest.Mock;
     close: jest.Mock;
     on: jest.Mock;
+  };
+  let confirmChannel: {
+    publish: jest.Mock;
+    waitForConfirms: jest.Mock;
+    close: jest.Mock;
   };
   let handler: jest.Mock;
   let reconnectListener: (() => void | Promise<void>) | null;
@@ -44,11 +49,16 @@ describe('RabbitConsumerService', () => {
     handler = jest.fn().mockResolvedValue(undefined);
     reconnectListener = null;
 
+    confirmChannel = {
+      publish: jest.fn().mockReturnValue(true),
+      waitForConfirms: jest.fn().mockResolvedValue(undefined),
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+
     channel = {
       prefetch: jest.fn().mockResolvedValue(undefined),
       consume: jest.fn().mockResolvedValue({ consumerTag: 'tag-1' }),
       ack: jest.fn(),
-      sendToQueue: jest.fn(),
       publish: jest.fn(),
       cancel: jest.fn().mockResolvedValue(undefined),
       close: jest.fn().mockResolvedValue(undefined),
@@ -57,6 +67,7 @@ describe('RabbitConsumerService', () => {
 
     connection = {
       createChannel: jest.fn().mockResolvedValue(channel),
+      createConfirmChannel: jest.fn().mockResolvedValue(confirmChannel),
       isConnected: jest.fn().mockReturnValue(true),
       onReconnect: jest.fn((listener: () => void | Promise<void>) => {
         reconnectListener = listener;
@@ -73,7 +84,7 @@ describe('RabbitConsumerService', () => {
     await service.start({
       queue: 'events.main',
       exchange: 'events.topic',
-      dlqQueue: 'events.dlq',
+      dlqExchange: 'events.dlx',
       retryRoutingKey: 'event.retry',
       handler,
     });
@@ -93,7 +104,7 @@ describe('RabbitConsumerService', () => {
     expect(channel.ack).toHaveBeenCalled();
   });
 
-  it('schedules retry on transient error', async () => {
+  it('schedules retry on transient error with publisher confirms', async () => {
     handler.mockRejectedValue(new TransientError('temporary'));
 
     const consumeCb = channel.consume.mock.calls[0][1] as (msg: unknown) => void;
@@ -101,7 +112,7 @@ describe('RabbitConsumerService', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(channel.publish).toHaveBeenCalledWith(
+    expect(confirmChannel.publish).toHaveBeenCalledWith(
       'events.topic',
       'event.retry',
       expect.any(Buffer),
@@ -111,10 +122,11 @@ describe('RabbitConsumerService', () => {
         }),
       }),
     );
+    expect(confirmChannel.waitForConfirms).toHaveBeenCalled();
     expect(channel.ack).toHaveBeenCalled();
   });
 
-  it('moves permanent errors to DLQ', async () => {
+  it('moves permanent errors to DLQ via DLX exchange', async () => {
     handler.mockRejectedValue(new PermanentError('bad payload'));
 
     const consumeCb = channel.consume.mock.calls[0][1] as (msg: unknown) => void;
@@ -122,10 +134,13 @@ describe('RabbitConsumerService', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(channel.sendToQueue).toHaveBeenCalledWith(
-      'events.dlq',
+    expect(confirmChannel.publish).toHaveBeenCalledWith(
+      'events.dlx',
+      '',
       expect.any(Buffer),
-      expect.any(Object),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'x-error': 'bad payload' }),
+      }),
     );
     expect(channel.ack).toHaveBeenCalled();
   });
@@ -138,8 +153,9 @@ describe('RabbitConsumerService', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    expect(channel.sendToQueue).toHaveBeenCalledWith(
-      'events.dlq',
+    expect(confirmChannel.publish).toHaveBeenCalledWith(
+      'events.dlx',
+      '',
       expect.any(Buffer),
       expect.any(Object),
     );

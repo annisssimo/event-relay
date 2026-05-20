@@ -16,7 +16,8 @@ export interface PublishOptions {
 export interface ConsumerOptions {
   queue: string;
   exchange: string;
-  dlqQueue: string;
+  /** Fanout DLX exchange bound to the dead-letter queue. */
+  dlqExchange: string;
   prefetch?: number;
   retryRoutingKey: string;
   handler: MessageHandler;

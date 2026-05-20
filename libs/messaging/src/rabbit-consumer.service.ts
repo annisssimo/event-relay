@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import type { Channel, ConsumeMessage } from 'amqplib';
+import type { Channel, ConsumeMessage, Options } from 'amqplib';
 import { MESSAGE_HEADERS, RETRY_POLICY } from '@app/contracts';
 import { PermanentError, isTransientError, sleep } from '@app/common';
 import { RabbitConnectionManager } from './rabbit-connection.manager';
@@ -149,18 +149,23 @@ export class RabbitConsumerService implements OnModuleDestroy {
       );
 
       if (toDlq) {
-        this.channel.sendToQueue(this.options.dlqQueue, msg.content, {
-          persistent: true,
-          contentType: msg.properties.contentType,
-          messageId: msg.properties.messageId,
-          headers: {
-            ...msg.properties.headers,
-            'x-error': (error as Error).message,
+        await this.publishConfirmed(
+          this.options.dlqExchange,
+          '',
+          msg.content,
+          {
+            persistent: true,
+            contentType: msg.properties.contentType,
+            messageId: msg.properties.messageId,
+            headers: {
+              ...msg.properties.headers,
+              'x-error': (error as Error).message,
+            },
           },
-        });
+        );
         this.channel.ack(msg);
         this.logger.warn(
-          `Moved to DLQ=${this.options.dlqQueue} deliveryTag=${msg.fields.deliveryTag}`,
+          `Moved to DLQ via ${this.options.dlqExchange} deliveryTag=${msg.fields.deliveryTag}`,
         );
       } else {
         const nextRetry = retryCount + 1;
@@ -168,7 +173,7 @@ export class RabbitConsumerService implements OnModuleDestroy {
           ...msg.properties.headers,
           [MESSAGE_HEADERS.RETRY_COUNT]: nextRetry,
         };
-        this.channel.publish(
+        await this.publishConfirmed(
           this.options.exchange,
           this.options.retryRoutingKey,
           msg.content,
@@ -184,6 +189,33 @@ export class RabbitConsumerService implements OnModuleDestroy {
       }
     } finally {
       this.inFlight--;
+    }
+  }
+
+  private async publishConfirmed(
+    exchange: string,
+    routingKey: string,
+    content: Buffer,
+    properties: Options.Publish,
+  ): Promise<void> {
+    const confirmChannel = await this.connection.createConfirmChannel();
+    try {
+      const published = confirmChannel.publish(
+        exchange,
+        routingKey,
+        content,
+        properties,
+      );
+      if (!published) {
+        throw new Error('RabbitMQ publish buffer full (backpressure)');
+      }
+      await confirmChannel.waitForConfirms();
+    } finally {
+      try {
+        await confirmChannel.close();
+      } catch {
+        // ignore
+      }
     }
   }
 

@@ -34,7 +34,7 @@ cp .env.example .env
 # TELEGRAM_DEFAULT_CHAT_ID=... your chat id
 ```
 
-2. Start stack:
+2. Start stack (runs DB migration automatically, `DB_SYNCHRONIZE=false`):
 
 ```bash
 docker compose up --build
@@ -56,11 +56,15 @@ curl -s -X POST http://localhost:3001/api/v1/events \
 
 ```bash
 npm install
-# Start RabbitMQ + Postgres locally, then:
+# Start RabbitMQ + Postgres locally, apply migration:
+psql "$DATABASE_URL" -f migrations/001_init.sql
+# Then:
 npm run start:consumer:dev
 npm run start:telegram:dev
 npm run start:producer:dev
 ```
+
+Set `DB_SYNCHRONIZE=false` in `.env` when using migrations.
 
 ## Guarantees and edge cases
 
@@ -80,7 +84,7 @@ npm run start:producer:dev
 - Manual ack after successful processing.
 - **Auto-resubscribe** on RabbitMQ connection/channel recovery.
 - Transient failures → delayed retry queue (`x-retry-count`, max 5).
-- Permanent failures / max retries → **DLQ** (`events.dlq`) via explicit `sendToQueue`.
+- Permanent failures / max retries → **DLQ** via `events.dlx` fanout exchange (publisher confirms).
 - Idempotency: atomic insert + skip concurrent `PROCESSING`; stale locks reclaimed after 2 min.
 - Structured logs: `eventId`, `type`, `result`, `durationMs`.
 
@@ -89,7 +93,8 @@ npm run start:producer:dev
 - **Reserve-before-send** dedup in PostgreSQL (release on API failure).
 - Truncates messages > 4096 chars.
 - Invalid token → process fails at startup.
-- Invalid `chatId` → permanent error → DLQ.
+- Invalid `chatId` → permanent error → DLQ via `notifications.dlx`.
+- Direct HTTP bypass: `POST /api/v1/notify` (for manual sends, skips queue).
 
 ### DLQ replay (manual)
 1. Open RabbitMQ Management: http://localhost:15672 (guest/guest).
@@ -102,18 +107,27 @@ Current flow: consumer marks event completed in PG, then publishes notification.
 ## Tests
 
 ```bash
-npm test
-npm run test:e2e
+npm test                  # unit tests
+npm run test:e2e          # HTTP controller e2e (real service layer, mocked broker/TG)
+npm run test:integration  # full pipeline with Testcontainers (RabbitMQ + PostgreSQL)
 npm run lint
 ```
 
+Integration tests require Docker (used by Testcontainers).
+
+## CI
+
+GitHub Actions runs lint, unit, e2e, and integration tests on push/PR to `main`.
+
 ## Production database
 
-For production set `DB_SYNCHRONIZE=false` and apply schema:
+Schema is applied via `migrate` service in Docker Compose or manually:
 
 ```bash
 psql "$DATABASE_URL" -f migrations/001_init.sql
 ```
+
+Keep `DB_SYNCHRONIZE=false` in production.
 
 ## Project layout
 
@@ -124,4 +138,6 @@ apps/telegram   — Telegram Bot API adapter
 libs/contracts  — DTOs, topology constants
 libs/messaging  — amqplib connection, confirms, consumer engine
 libs/common     — errors, retry, health helpers
+migrations/     — PostgreSQL schema
+test/integration/ — Testcontainers pipeline tests
 ```
