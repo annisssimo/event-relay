@@ -1,0 +1,87 @@
+name: eventrelay
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: events
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U app -d events']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: consumer
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      DATABASE_URL: postgresql://app:app@postgres:5432/events
+      TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
+      CONSUMER_PORT: 3002
+      DB_SYNCHRONIZE: 'true'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - '3002:3002'
+
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: producer
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      PRODUCER_PORT: 3001
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      consumer:
+        condition: service_started
+    ports:
+      - '3001:3001'
+
+  telegram:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: telegram
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      DATABASE_URL: postgresql://app:app@postgres:5432/events
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_DEFAULT_CHAT_ID: ${TELEGRAM_DEFAULT_CHAT_ID}
+      TELEGRAM_PORT: 3003
+      DB_SYNCHRONIZE: 'true'
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      consumer:
+        condition: service_started
+    ports:
+      - '3003:3003'

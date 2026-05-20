@@ -1,0 +1,145 @@
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
+import type { Channel, ConsumeMessage } from 'amqplib';
+import { MESSAGE_HEADERS, RETRY_POLICY } from '@app/contracts';
+import { PermanentError, isTransientError } from '@app/common';
+import { RabbitConnectionManager } from './rabbit-connection.manager';
+import { ConsumerOptions, MessageHandler } from './types';
+
+@Injectable()
+export class RabbitConsumerService implements OnModuleDestroy {
+  private readonly logger = new Logger(RabbitConsumerService.name);
+  private channel: Channel | null = null;
+  private consumerTag: string | null = null;
+  private inFlight = 0;
+  private options: ConsumerOptions | null = null;
+
+  constructor(private readonly connection: RabbitConnectionManager) {}
+
+  async start(options: ConsumerOptions): Promise<void> {
+    this.options = options;
+    await this.setupConsumer();
+  }
+
+  private async setupConsumer(): Promise<void> {
+    if (!this.options) {
+      return;
+    }
+    const channel = await this.connection.createChannel();
+    this.channel = channel;
+    const prefetch = this.options.prefetch ?? 10;
+    await channel.prefetch(prefetch);
+
+    const { consumerTag } = await channel.consume(
+      this.options.queue,
+      (msg) => {
+        if (!msg) {
+          return;
+        }
+        void this.handleMessage(msg);
+      },
+      { noAck: false },
+    );
+    this.consumerTag = consumerTag;
+    this.logger.log(`Consuming queue=${this.options.queue} tag=${consumerTag}`);
+  }
+
+  private getRetryCount(msg: ConsumeMessage): number {
+    const header = msg.properties.headers?.[MESSAGE_HEADERS.RETRY_COUNT];
+    if (typeof header === 'number') {
+      return header;
+    }
+    const deaths = msg.properties.headers?.['x-death'] as
+      | Array<{ count?: number }>
+      | undefined;
+    if (Array.isArray(deaths) && deaths.length > 0) {
+      return deaths.reduce((sum, d) => sum + (d.count ?? 0), 0);
+    }
+    return 0;
+  }
+
+  private async handleMessage(msg: ConsumeMessage): Promise<void> {
+    if (!this.channel || !this.options) {
+      return;
+    }
+    this.inFlight++;
+    const started = Date.now();
+    try {
+      await this.options.handler(msg.content, msg);
+      this.channel.ack(msg);
+      this.logger.debug(
+        `Ack message deliveryTag=${msg.fields.deliveryTag} durationMs=${Date.now() - started}`,
+      );
+    } catch (error) {
+      const transient = isTransientError(error);
+      const retryCount = this.getRetryCount(msg);
+      const toDlq =
+        error instanceof PermanentError ||
+        retryCount >= RETRY_POLICY.MAX_RETRIES ||
+        !transient;
+
+      this.logger.error(
+        `Message processing failed deliveryTag=${msg.fields.deliveryTag} transient=${transient} retries=${retryCount} error=${(error as Error).message}`,
+        (error as Error).stack,
+      );
+
+      if (toDlq) {
+        this.channel.sendToQueue(this.options.dlqQueue, msg.content, {
+          persistent: true,
+          contentType: msg.properties.contentType,
+          messageId: msg.properties.messageId,
+          headers: {
+            ...msg.properties.headers,
+            'x-error': (error as Error).message,
+          },
+        });
+        this.channel.ack(msg);
+        this.logger.warn(
+          `Moved to DLQ=${this.options.dlqQueue} deliveryTag=${msg.fields.deliveryTag}`,
+        );
+      } else {
+        const nextRetry = retryCount + 1;
+        const headers = {
+          ...msg.properties.headers,
+          [MESSAGE_HEADERS.RETRY_COUNT]: nextRetry,
+        };
+        this.channel.publish(
+          this.options.exchange,
+          this.options.retryRoutingKey,
+          msg.content,
+          {
+            headers,
+            persistent: true,
+            contentType: msg.properties.contentType,
+            messageId: msg.properties.messageId,
+          },
+        );
+        this.channel.ack(msg);
+        this.logger.warn(`Scheduled retry #${nextRetry}`);
+      }
+    } finally {
+      this.inFlight--;
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    const deadline = Date.now() + 30_000;
+    while (this.inFlight > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (this.channel && this.consumerTag) {
+      try {
+        await this.channel.cancel(this.consumerTag);
+        await this.channel.close();
+      } catch {
+        // ignore
+      }
+    }
+    this.channel = null;
+    this.consumerTag = null;
+  }
+}
